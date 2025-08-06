@@ -35,5 +35,5 @@ const app = express();
     console.log("Error : ", error);
     throw error;
   }
-})();
+})(); // IIFE ()() execute the function immediately
 */
