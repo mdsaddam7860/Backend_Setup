@@ -28,11 +28,12 @@ const registerUser = asyncHandler(async (req, res) => {
   }
 
   // Check for user if already exist
-  const existedUser = User.findOne({
+  const existedUser = await User.findOne({
     $or: [{ userName }, { email }],
   });
 
   if (existedUser) {
+    console.log("existedUser", existedUser);
     throw new ApiError((409, "usename or email already exist"));
   }
 
@@ -40,8 +41,18 @@ const registerUser = asyncHandler(async (req, res) => {
 
   const avatarLocalFilePath = req.files?.avatar[0].path;
   // console.log("localFilePath", avatarLocalFilePath);
-  const coverImaageLocalFilePath = req.files?.coverImage[0].path;
-  // console.log("coverImaageLocalFilePath", coverImaageLocalFilePath);
+  // const coverImageLocalFilePath = req.files?.coverImage[0].path;
+  // console.log("coverImageLocalFilePath", coverImageLocalFilePath);
+
+  let coverImageLocalFilePath;
+
+  if (
+    req.files &&
+    Array.isArray(req.files.coverImage) &&
+    req.files.coverImage.length > 0
+  ) {
+    coverImageLocalFilePath = req.files.coverImage[0].path;
+  }
 
   if (!avatarLocalFilePath) {
     throw new ApiError(400, "Avatar is required");
@@ -49,21 +60,21 @@ const registerUser = asyncHandler(async (req, res) => {
 
   // upload on cloudinary
   const avatar = await uploadOnCloudinary(avatarLocalFilePath);
-  const coverImage = uploadOnCloudinary(coverImaageLocalFilePath);
+  const coverImage = await uploadOnCloudinary(coverImageLocalFilePath);
 
-  // avartar is required
+  // avatar is required
   if (!avatar) {
     throw new ApiError(400, "Avatar is required");
   }
 
   // Create user
   const user = await User.create({
-    userName,
     fullName,
+    userName: userName.toLowerCase(),
     email,
     password,
     avatar: avatar.url,
-    coverImage: coverImage?.url,
+    coverImage: coverImage?.url || "",
   });
 
   const createdUser = await User.findById(user._id).select(
@@ -74,9 +85,11 @@ const registerUser = asyncHandler(async (req, res) => {
     throw new ApiError(500, "Something went wrong while registering user");
   }
 
+  console.log("Created user successfully: ");
+
   return res
     .status(201)
-    .json(new ApiResponse(200, createdUser, "User registered successfuully"));
+    .json(new ApiResponse(200, createdUser, "User registered successfully"));
 });
 
 export { registerUser };
