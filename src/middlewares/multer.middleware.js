@@ -12,6 +12,7 @@ const tempDir = path.join(__dirname, "..", "..", "public", "temp");
 
 // Ensure the directory exists
 if (!fs.existsSync(tempDir)) {
+  console.log("Directory does not exist. Creating...", tempDir);
   fs.mkdirSync(tempDir, { recursive: true });
 }
 
