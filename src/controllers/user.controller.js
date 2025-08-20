@@ -4,6 +4,8 @@ import { User } from "../models/user.model.js";
 import { uploadOnCloudinary } from "../utils/cloudinary.js";
 import { ApiResponse } from "../utils/ApiResponse.js";
 import jwt from "jsonwebtoken";
+import { deleteFileOnCloudinary } from "../utils/deleteFileOnCloudinary.js";
+import mongoose from "mongoose";
 
 const generateAccessAndRefreshToken = async (userId) => {
   try {
@@ -37,8 +39,8 @@ const registerUser = asyncHandler(async (req, res) => {
   // How to get user details from frontend we can use req.body for that purpose
   // except url
   // Destructuring the request body to extract user details
+  console.log("req.body", req.body);
   const { userName, fullName, email, password } = req.body; // we can extract info from request body
-  console.log("email", email);
 
   // Validation check
   if (
@@ -147,7 +149,7 @@ const loginUser = asyncHandler(async (req, res) => {
   if (!isPasswordValidate) {
     throw new ApiError(401, "Invalid credentials");
   }
-  console.log("generate access token");
+  // console.log("generate access token");
   // generate refresh ans access Token
   const { accessToken, refreshToken } = await generateAccessAndRefreshToken(
     user._id
@@ -177,13 +179,13 @@ const loginUser = asyncHandler(async (req, res) => {
 });
 
 const logoutUser = asyncHandler(async (req, res) => {
-  console.log("req.user._id", req.user._id);
-  console.log("req.user", req.user);
+  // console.log("req.user._id", req.user._id);
+  // console.log("req.user", req.user);
   const user = await User.findByIdAndUpdate(
     req.user._id,
     {
-      $set: {
-        refreshToken: undefined, // Clear the refresh token
+      $unset: {
+        refreshToken: 1, // this removes the field from document
       },
     },
     {
@@ -206,13 +208,13 @@ const logoutUser = asyncHandler(async (req, res) => {
 const refreshAccessToken = asyncHandler(async (req, res) => {
   const incomingRefreshToken =
     req.cookies?.refreshToken || req.body.refreshToken;
-
+  console.log("incomingRefreshToken", incomingRefreshToken);
   if (!incomingRefreshToken) {
     throw new ApiError(401, "Unauthorized request");
   }
 
   try {
-    const decodedToken = await jwt(
+    const decodedToken = await jwt.verify(
       incomingRefreshToken,
       process.env.REFRESH_TOKEN_SECRET
     );
@@ -220,34 +222,35 @@ const refreshAccessToken = asyncHandler(async (req, res) => {
     const user = await User.findById(decodedToken?._id);
 
     if (!user) {
-      throw new ApiError(401, "Invalid Refresh Token");
+      throw new ApiError(401, "User not Found Invalid Refresh Token");
     }
 
     if (incomingRefreshToken !== user?.refreshToken) {
-      throw new ApiError(401, "Invalid Refresh Token");
+      throw new ApiError(401, " Refresh Token is not same as in database");
     }
 
-    const { accessToken, newRefreshToken } =
-      await generateAccessAndRefreshToken(user._id);
+    const { accessToken, refreshToken } = await generateAccessAndRefreshToken(
+      user._id
+    );
 
     const options = {
       httpOnly: true,
       secure: true,
     };
 
-    return req
+    return res
       .status(200)
       .cookie("accessToken", accessToken, options)
-      .cookie("refreshToken", newRefreshToken, options)
+      .cookie("refreshToken", refreshToken, options)
       .json(
         new ApiResponse(
           200,
-          { accessToken, refreshToken: newRefreshToken },
+          { accessToken, refreshToken },
           "Access token refreshed successfully"
         )
       );
   } catch (error) {
-    throw new ApiError(401, "Invalid Refresh Token");
+    throw new ApiError(401, "Invalid Refresh Token last error");
   }
 });
 
@@ -256,26 +259,29 @@ const changeCurrentPassword = asyncHandler(async (req, res) => {
   // check for password match
   // change password
   // return response
-  const { currentPassword, newPassword } = req.body;
+  try {
+    const { currentPassword, newPassword } = req.body;
 
-  if (!(currentPassword || newPassword)) {
-    throw new ApiError(400, "Current and new Password required");
+    if (!(currentPassword || newPassword)) {
+      throw new ApiError(400, "Current and new Password required");
+    }
+
+    const user = await User.findById(req.user?._id);
+
+    const isPasswordCorrect = await user.isPasswordCorrect(currentPassword);
+
+    if (!isPasswordCorrect) {
+      throw new ApiError(400, "Current password is incorrect");
+    }
+    user.password = newPassword;
+    await user.save({ validateBeforeSave: false });
+    console.log("Password changed successfully");
+    return res
+      .status(200)
+      .json(new ApiResponse(200, {}, "Password changed successfully"));
+  } catch (error) {
+    throw new ApiError(500, "Error while changing password");
   }
-
-  const user = await User.findById(req.user?._id);
-
-  const isPasswordCorrect = user.isPasswordCorrect(currentPassword);
-
-  if (!isPasswordCorrect) {
-    throw new ApiError(400, "Current password is incorrect");
-  }
-
-  user.password = newPassword;
-  await user.save({ validateBeforeSave: false });
-
-  return res
-    .staus(200)
-    .json(new ApiResponse(200, {}, "Password changed successfully"));
 });
 
 const getCurrentUser = asyncHandler(async (req, res) => {
@@ -313,10 +319,16 @@ const updateUserAvatar = asyncHandler(async (req, res) => {
     throw new ApiError(400, "Avatar is required");
   }
 
+  // Upload on cloudinary
   const avatar = await uploadOnCloudinary(localFilePathAvatar);
   if (!avatar.url) {
     throw new ApiError(500, "Error uploading avatar on cloudinary");
   }
+
+  // Delete on Cloudinary
+
+  const result = await deleteFileOnCloudinary(req.user?.avatar);
+  console.log("Avatar deleted successfully on cloudinary", result);
 
   const user = await User.findByIdAndUpdate(
     req.user?._id,
@@ -346,6 +358,8 @@ const updateUserCoverImage = asyncHandler(async (req, res) => {
   }
 
   // TODO : Delete the image after uploading on cloudinary
+
+  await deleteFileOnCloudinary(req.user?.coverImage);
 
   const user = await User.findByIdAndUpdate(
     req.user?._id,
@@ -468,7 +482,7 @@ const getWatchHistory = asyncHandler(async (req, res) => {
           },
           {
             $addFields: {
-              $first: "$owner",
+              first: "$owner",
             },
           },
         ],
